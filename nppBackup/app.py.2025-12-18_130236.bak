@@ -124,7 +124,7 @@ if current_search_hash != st.session_state['last_search_hash']:
 if query:
     url = "https://api.openalex.org/works"
     
-    combined_search = f"{query} {selected_principle}"
+    combined_search = f"{query} AND \"{selected_principle}\""
     
     filter_string = "topics.id:T11168"
     if is_global_south:
