@@ -125,9 +125,9 @@ if query:
                         # UI Layout
                         with st.container():
                             if link:
-                                st.markdown(f"##### [{title}]({link})")
+                                st.markdown(f"### [{title}]({link})")
                             else:
-                                st.markdown(f"##### {title}")
+                                st.markdown(f"### {title}")
                             
                             c1, c2, c3 = st.columns([2, 1, 1])
                             with c1: st.caption(f"✍️ {author_str}")
