@@ -37,14 +37,12 @@ selected_principle = st.radio(
     horizontal=True
 )
 
-# NEW: Global South Checkbox
-is_global_south = st.checkbox("Only show works from the Global South (institutions.is_global_south:true)")
-
 query = st.text_input("Enter keyword:", placeholder="e.g., Microfinance, cash transfers")
 
 # --- Reset Logic ---
-# If inputs change, reset to Page 1.
-current_search_hash = f"{query}_{selected_principle}_{is_global_south}"
+# If the user changes the query or filter, we must reset to Page 1.
+# We store the last query/filter to detect changes.
+current_search_hash = f"{query}_{selected_principle}"
 if 'last_search_hash' not in st.session_state:
     st.session_state['last_search_hash'] = current_search_hash
 
@@ -59,37 +57,30 @@ if query:
     
     combined_search = f"{query} AND \"{selected_principle}\""
     
-    # --- CONSTRUCT FILTER STRING ---
-    # Start with the mandatory Topic ID
-    filter_string = "topics.id:T11168"
-    
-    # If checkbox is checked, append the Global South filter
-    if is_global_south:
-        filter_string += ",institutions.is_global_south:true"
-    
-    # 1. API Call for PAPERS
+    # 1. API Call for PAPERS (Uses Page Number)
     params_works = {
         "search": combined_search,
-        "filter": filter_string,
+        "filter": "topics.id:T11168",
         "sort": "cited_by_count:desc",
         "per_page": 10,
-        "page": st.session_state['page'],
+        "page": st.session_state['page'], # <--- DYNAMIC PAGE NUMBER
         "mailto": "email@email.com"  
     }
 
-    # 2. API Call for AUTHORS (Respects the same Global South filter)
+    # 2. API Call for AUTHORS (Only needed on Page 1 usually, but we'll keep it)
     params_authors = {
         "search": combined_search,
-        "filter": filter_string,
+        "filter": "topics.id:T11168",
         "group_by": "authorships.author.id",
         "mailto": "email@email.com"
     }
 
-    st.caption(f"Page {st.session_state['page']} | Filter: `{filter_string}`")
+    st.caption(f"Searching for: `{combined_search}` | Page {st.session_state['page']}")
 
-    with st.spinner("Fetching global literature..."):
+    with st.spinner("Fetching results..."):
         try:
-            # --- Fetch Authors (Page 1 Only) ---
+            # --- Fetch Authors (Only show on Page 1 to reduce clutter?) ---
+            # Let's keep it on all pages for now, or you can wrap in "if st.session_state['page'] == 1:"
             top_authors_data = []
             if st.session_state['page'] == 1:
                 response_authors = requests.get(url, params=params_authors)
@@ -106,9 +97,9 @@ if query:
             
             # --- UI RENDERING ---
             
-            # A. Render Author Table
+            # A. Render Author Table (Only on Page 1)
             if top_authors_data:
-                st.subheader("🏆 Top 10 Authors (Matching Filters)")
+                st.subheader("🏆 Top 10 Authors for this Query")
                 df = pd.DataFrame(top_authors_data)
                 st.dataframe(df, use_container_width=True, hide_index=True)
                 st.markdown("---")
@@ -120,7 +111,7 @@ if query:
                 total_count = data['meta']['count']
                 
                 if not results:
-                    st.warning("No results found matching all criteria.")
+                    st.warning("No more results found.")
                 else:
                     st.subheader(f"📚 Top Papers (Found {total_count})")
                     
@@ -164,13 +155,16 @@ if query:
                         if st.session_state['page'] > 1:
                             if st.button("⬅️ Previous Page"):
                                 st.session_state['page'] -= 1
-                                st.rerun()
+                                st.rerun() # Force immediate reload
 
                     with col_next:
+                        # Only show Next if there are more results to show
+                        # (current_page * 10) < total_results
                         if (st.session_state['page'] * 10) < total_count:
                             if st.button("Next Page ➡️"):
                                 st.session_state['page'] += 1
-                                st.rerun()
+                                st.rerun() # Force immediate reload
+
             else:
                 st.error(f"Error fetching works: {response_works.status_code}")
 
