@@ -80,9 +80,9 @@ def fetch_author_details(author_ids):
     return details_map
 
 # --- App Configuration ---
-st.set_page_config(page_title="Development Cooperation Effectiveness", page_icon="🌍", layout="wide")
-st.title("🌍 Development Cooperation Effectiveness")
-st.markdown("Search OpenAlex for research on the Principles of Development Cooperation Effectiveness")
+st.set_page_config(page_title="Development Effectiveness Search", page_icon="🌍", layout="wide")
+st.title("🌍 Development Effectiveness & Aid Search")
+st.markdown("Searching specifically within **International Development and Aid**.")
 
 # --- Session State ---
 if 'page' not in st.session_state:
