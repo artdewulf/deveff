@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 import pandas as pd
 
-# --- Helper Function: Abstract ---
+# --- Helper Functions ---
 def reconstruct_abstract(inverted_index):
     """Reconstructs the abstract text from OpenAlex's inverted index format."""
     if not inverted_index:
@@ -16,84 +16,34 @@ def reconstruct_abstract(inverted_index):
             abstract_words[index] = word
     return " ".join(abstract_words)
 
-# --- Helper Function: Get Author Details ---
-def fetch_author_details(author_ids):
-    """
-    Takes a list of OpenAlex Author IDs (e.g., ['https://openalex.org/A123', ...])
-    and fetches their Institution and Country in one batch call.
-    """
-    if not author_ids:
-        return {}
-    
-    # Clean IDs to get just the "A..." part if full URL is provided
-    clean_ids = [aid.split('/')[-1] for aid in author_ids]
-    
-    # OpenAlex allows filtering by multiple IDs separated by pipe |
-    ids_param = "|".join(clean_ids)
-    
-    url = "https://api.openalex.org/authors"
-    params = {
-        "filter": f"openalex_id:{ids_param}",
-        "per_page": 50
-    }
-    
-    try:
-        response = requests.get(url, params=params)
-        if response.status_code == 200:
-            data = response.json().get('results', [])
-            details_map = {}
-            for author in data:
-                # Extract last known institution
-                affil = author.get('last_known_institution')
-                if affil:
-                    inst_name = affil.get('display_name', 'Unknown')
-                    country = affil.get('country_code', '')
-                else:
-                    inst_name = "Unknown"
-                    country = ""
-                
-                details_map[author['id']] = {
-                    "institution": inst_name,
-                    "country": country
-                }
-            return details_map
-    except:
-        return {}
-    return {}
-
 # --- App Configuration ---
-st.set_page_config(page_title="Development Effectiveness Search", page_icon="🌍", layout="wide")
+st.set_page_config(page_title="Development Effectiveness Search", page_icon="🌍")
 st.title("🌍 Development Effectiveness & Aid Search")
 st.markdown("Searching specifically within **International Development and Aid**.")
 
-# --- Session State ---
+# --- Session State Initialization ---
 if 'page' not in st.session_state:
     st.session_state['page'] = 1
 
 # --- Input Section ---
-col_controls_1, col_controls_2 = st.columns([2, 1])
+selected_principle = st.radio(
+    "Filter by Development Effectiveness Principle:",
+    [
+        "Country Ownership", 
+        "Focus on Results", 
+        "Inclusive Partnerships", 
+        "Transparency and Accountability"
+    ],
+    horizontal=True
+)
 
-with col_controls_1:
-    selected_principle = st.radio(
-        "Filter by Principle:",
-        [
-            "Country Ownership", 
-            "Focus on Results", 
-            "Inclusive Partnerships", 
-            "Transparency and Accountability"
-        ],
-        horizontal=True
-    )
-
-with col_controls_2:
-    st.write("") # Spacer
-    st.write("") 
-    is_global_south = st.checkbox("Only Global South Works", 
-                                  help="Filters for institutions located in the Global South (World Bank definition).")
+# NEW: Global South Checkbox
+is_global_south = st.checkbox("Only show works from the Global South (institutions.is_global_south:true)")
 
 query = st.text_input("Enter keyword:", placeholder="e.g., Microfinance, cash transfers")
 
 # --- Reset Logic ---
+# If inputs change, reset to Page 1.
 current_search_hash = f"{query}_{selected_principle}_{is_global_south}"
 if 'last_search_hash' not in st.session_state:
     st.session_state['last_search_hash'] = current_search_hash
@@ -104,12 +54,16 @@ if current_search_hash != st.session_state['last_search_hash']:
 
 # --- Search Logic ---
 if query:
+    # OpenAlex API Endpoint
     url = "https://api.openalex.org/works"
     
     combined_search = f"{query} AND \"{selected_principle}\""
     
-    # Base Filter
+    # --- CONSTRUCT FILTER STRING ---
+    # Start with the mandatory Topic ID
     filter_string = "topics.id:T11168"
+    
+    # If checkbox is checked, append the Global South filter
     if is_global_south:
         filter_string += ",institutions.is_global_south:true"
     
@@ -123,7 +77,7 @@ if query:
         "mailto": "email@email.com"  
     }
 
-    # 2. API Call for TOP AUTHORS (Group By)
+    # 2. API Call for AUTHORS (Respects the same Global South filter)
     params_authors = {
         "search": combined_search,
         "filter": filter_string,
@@ -133,56 +87,33 @@ if query:
 
     st.caption(f"Page {st.session_state['page']} | Filter: `{filter_string}`")
 
-    with st.spinner("Fetching global literature and author profiles..."):
+    with st.spinner("Fetching global literature..."):
         try:
-            # --- PHASE 1: Fetch Authors (Page 1 Only) ---
+            # --- Fetch Authors (Page 1 Only) ---
             top_authors_data = []
             if st.session_state['page'] == 1:
                 response_authors = requests.get(url, params=params_authors)
-                
                 if response_authors.status_code == 200:
                     author_groups = response_authors.json().get('group_by', [])
-                    top_10_groups = author_groups[:10]
-                    
-                    # EXTRACT IDS for batch lookup
-                    ids_to_fetch = [group['key'] for group in top_10_groups]
-                    
-                    # BATCH FETCH DETAILS
-                    author_details_map = fetch_author_details(ids_to_fetch)
-                    
-                    for group in top_10_groups:
-                        a_id = group['key']
-                        details = author_details_map.get(a_id, {"institution": "Unknown", "country": ""})
-                        
+                    for group in author_groups[:10]:
                         top_authors_data.append({
                             "Author Name": group['key_display_name'],
-                            "Institution": details['institution'],
-                            "Country": details['country'],
                             "Works Count": group['count']
                         })
 
-            # --- PHASE 2: Fetch Papers ---
+            # --- Fetch Papers ---
             response_works = requests.get(url, params=params_works)
             
             # --- UI RENDERING ---
             
-            # A. Author Table
+            # A. Render Author Table
             if top_authors_data:
                 st.subheader("🏆 Top 10 Authors (Matching Filters)")
                 df = pd.DataFrame(top_authors_data)
-                
-                # Column Config for better display (flags for countries if possible, but code is safer)
-                st.dataframe(
-                    df, 
-                    use_container_width=True, 
-                    hide_index=True,
-                    column_config={
-                        "Works Count": st.column_config.NumberColumn(format="%d")
-                    }
-                )
+                st.dataframe(df, use_container_width=True, hide_index=True)
                 st.markdown("---")
 
-            # B. Paper Results
+            # B. Render Papers
             if response_works.status_code == 200:
                 data = response_works.json()
                 results = data.get('results', [])
@@ -200,11 +131,6 @@ if query:
                         cited_by = work.get('cited_by_count')
                         link = work.get('doi') or work.get('landing_page_url')
                         
-                        # Source (Journal/Conference) Extraction
-                        primary_loc = work.get('primary_location') or {}
-                        source = primary_loc.get('source') or {}
-                        source_name = source.get('display_name', 'Unknown Source')
-                        
                         authorships = work.get('authorships', [])
                         author_names = [a['author']['display_name'] for a in authorships]
                         if len(author_names) > 3:
@@ -219,12 +145,10 @@ if query:
                             else:
                                 st.markdown(f"### {title}")
                             
-                            # Info Row
-                            c1, c2, c3, c4 = st.columns([3, 2, 1, 1])
-                            with c1: st.caption(f"**Source:** {source_name}")
-                            with c2: st.caption(f"✍️ {author_str}")
-                            with c3: st.caption(f"📅 {publication_year}")
-                            with c4: st.markdown(f"**⭐ {cited_by}**")
+                            c1, c2, c3 = st.columns([2, 1, 1])
+                            with c1: st.caption(f"✍️ {author_str}")
+                            with c2: st.caption(f"📅 {publication_year}")
+                            with c3: st.markdown(f"**⭐ Citations: {cited_by}**")
                             
                             abstract_text = reconstruct_abstract(work.get('abstract_inverted_index'))
                             if abstract_text:
@@ -233,17 +157,18 @@ if query:
                                 st.caption("*No abstract available.*")
                             st.divider()
 
-                    # --- Pagination ---
+                    # --- PAGINATION BUTTONS ---
                     col_prev, col_next = st.columns([1, 1])
+                    
                     with col_prev:
                         if st.session_state['page'] > 1:
-                            if st.button("⬅️ Previous"):
+                            if st.button("⬅️ Previous Page"):
                                 st.session_state['page'] -= 1
                                 st.rerun()
 
                     with col_next:
                         if (st.session_state['page'] * 10) < total_count:
-                            if st.button("Next ➡️"):
+                            if st.button("Next Page ➡️"):
                                 st.session_state['page'] += 1
                                 st.rerun()
             else:
