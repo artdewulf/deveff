@@ -16,20 +16,19 @@ def reconstruct_abstract(inverted_index):
             abstract_words[index] = word
     return " ".join(abstract_words)
 
-# --- Helper Function: Get Author Details (FIXED) ---
+# --- Helper Function: Get Author Details ---
 def fetch_author_details(author_ids):
     """
-    Fetches Institution and Country.
-    Fixes ID matching issues by normalizing everything to the short ID (e.g., 'A123').
+    Takes a list of OpenAlex Author IDs (e.g., ['https://openalex.org/A123', ...])
+    and fetches their Institution and Country in one batch call.
     """
     if not author_ids:
         return {}
     
-    # 1. Normalize input IDs to short format (remove 'https://openalex.org/')
-    # This ensures we are querying and mapping with consistent keys.
+    # Clean IDs to get just the "A..." part if full URL is provided
     clean_ids = [aid.split('/')[-1] for aid in author_ids]
     
-    # 2. Join with pipe for batch query
+    # OpenAlex allows filtering by multiple IDs separated by pipe |
     ids_param = "|".join(clean_ids)
     
     url = "https://api.openalex.org/authors"
@@ -38,46 +37,29 @@ def fetch_author_details(author_ids):
         "per_page": 50
     }
     
-    details_map = {}
-    
     try:
         response = requests.get(url, params=params)
         if response.status_code == 200:
             data = response.json().get('results', [])
-            
+            details_map = {}
             for author in data:
-                # 3. Normalize the ID from the response for the map key
-                response_id = author['id'].split('/')[-1]
+                # Extract last known institution
+                affil = author.get('last_known_institution')
+                if affil:
+                    inst_name = affil.get('display_name', 'Unknown')
+                    country = affil.get('country_code', '')
+                else:
+                    inst_name = "Unknown"
+                    country = ""
                 
-                # 4. robust Extraction logic
-                inst_name = "Unknown"
-                country = ""
-                
-                # Priority 1: Check 'last_known_institution'
-                lki = author.get('last_known_institution')
-                if lki:
-                    inst_name = lki.get('display_name') or "Unknown"
-                    country = lki.get('country_code') or ""
-                
-                # Priority 2: If that failed, check 'affiliations' list
-                if inst_name == "Unknown" and author.get('affiliations'):
-                    # Take the first affiliation that has an institution
-                    for aff in author['affiliations']:
-                        if aff.get('institution'):
-                            inst_name = aff['institution'].get('display_name')
-                            country = aff['institution'].get('country_code')
-                            break
-
-                details_map[response_id] = {
+                details_map[author['id']] = {
                     "institution": inst_name,
                     "country": country
                 }
-    except Exception as e:
-        # helpful for debugging if you run locally
-        print(f"Author fetch error: {e}")
+            return details_map
+    except:
         return {}
-        
-    return details_map
+    return {}
 
 # --- App Configuration ---
 st.set_page_config(page_title="Development Effectiveness Search", page_icon="🌍", layout="wide")
@@ -104,10 +86,10 @@ with col_controls_1:
     )
 
 with col_controls_2:
-    st.write("") 
+    st.write("") # Spacer
     st.write("") 
     is_global_south = st.checkbox("Only Global South Works", 
-                                  help="Filters for institutions located in the Global South.")
+                                  help="Filters for institutions located in the Global South (World Bank definition).")
 
 query = st.text_input("Enter keyword:", placeholder="e.g., Microfinance, cash transfers")
 
@@ -126,6 +108,7 @@ if query:
     
     combined_search = f"{query} AND \"{selected_principle}\""
     
+    # Base Filter
     filter_string = "topics.id:T11168"
     if is_global_south:
         filter_string += ",institutions.is_global_south:true"
@@ -140,7 +123,7 @@ if query:
         "mailto": "email@email.com"  
     }
 
-    # 2. API Call for TOP AUTHORS
+    # 2. API Call for TOP AUTHORS (Group By)
     params_authors = {
         "search": combined_search,
         "filter": filter_string,
@@ -161,17 +144,15 @@ if query:
                     author_groups = response_authors.json().get('group_by', [])
                     top_10_groups = author_groups[:10]
                     
-                    # Get list of URLs (e.g., https://openalex.org/A123)
-                    id_urls = [group['key'] for group in top_10_groups]
+                    # EXTRACT IDS for batch lookup
+                    ids_to_fetch = [group['key'] for group in top_10_groups]
                     
-                    # Pass URLs to our robust fetcher
-                    author_details_map = fetch_author_details(id_urls)
+                    # BATCH FETCH DETAILS
+                    author_details_map = fetch_author_details(ids_to_fetch)
                     
                     for group in top_10_groups:
-                        # Clean the ID key to match our map keys
-                        clean_key = group['key'].split('/')[-1]
-                        
-                        details = author_details_map.get(clean_key, {"institution": "Unknown", "country": ""})
+                        a_id = group['key']
+                        details = author_details_map.get(a_id, {"institution": "Unknown", "country": ""})
                         
                         top_authors_data.append({
                             "Author Name": group['key_display_name'],
@@ -190,6 +171,7 @@ if query:
                 st.subheader("🏆 Top 10 Authors (Matching Filters)")
                 df = pd.DataFrame(top_authors_data)
                 
+                # Column Config for better display (flags for countries if possible, but code is safer)
                 st.dataframe(
                     df, 
                     use_container_width=True, 
@@ -212,17 +194,17 @@ if query:
                     st.subheader(f"📚 Top Papers (Found {total_count})")
                     
                     for work in results:
+                        # Extract Data
                         title = work.get('title') or "Untitled"
                         publication_year = work.get('publication_year')
                         cited_by = work.get('cited_by_count')
                         link = work.get('doi') or work.get('landing_page_url')
                         
-                        # Source
+                        # Source (Journal/Conference) Extraction
                         primary_loc = work.get('primary_location') or {}
                         source = primary_loc.get('source') or {}
                         source_name = source.get('display_name', 'Unknown Source')
                         
-                        # Authors
                         authorships = work.get('authorships', [])
                         author_names = [a['author']['display_name'] for a in authorships]
                         if len(author_names) > 3:
@@ -230,12 +212,14 @@ if query:
                         else:
                             author_str = ", ".join(author_names)
 
+                        # Display
                         with st.container():
                             if link:
                                 st.markdown(f"### [{title}]({link})")
                             else:
                                 st.markdown(f"### {title}")
                             
+                            # Info Row
                             c1, c2, c3, c4 = st.columns([3, 2, 1, 1])
                             with c1: st.caption(f"**Source:** {source_name}")
                             with c2: st.caption(f"✍️ {author_str}")
@@ -249,6 +233,7 @@ if query:
                                 st.caption("*No abstract available.*")
                             st.divider()
 
+                    # --- Pagination ---
                     col_prev, col_next = st.columns([1, 1])
                     with col_prev:
                         if st.session_state['page'] > 1:
