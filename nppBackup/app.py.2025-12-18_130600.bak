@@ -243,9 +243,8 @@ if query:
                             with c4: st.markdown(f"**⭐ {cited_by}**")
                             
                             abstract_text = reconstruct_abstract(work.get('abstract_inverted_index'))
-                            
+                            abstract_text = abstract_text[0:2500]
                             if abstract_text:
-                                abstract_text = abstract_text[0:2500]
                                 st.markdown(f"<small>{abstract_text}</small>", unsafe_allow_html=True)
                             else:
                                 st.caption("*No abstract available.*")
