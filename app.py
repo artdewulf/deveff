@@ -81,7 +81,7 @@ def fetch_author_details(author_ids):
 
 # --- App Configuration ---
 st.set_page_config(page_title="Development Cooperation Effectiveness", page_icon="🌍", layout="wide")
-st.title("🌍 Development Cooperation Effectiveness")
+st.title("🌍 Development Cooperation Effectiveness 🌍")
 st.markdown("Search OpenAlex for research on the Principles of Development Cooperation Effectiveness")
 
 # --- Session State ---
